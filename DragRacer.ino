@@ -1,0 +1,228 @@
+/*
+ Name:		DragRacer.ino
+ Created:	7/2/2016 7:13:55 PM
+ Author:	Slade
+
+ To do:
+ * Semi random drops of crate pickups
+ * Get boost working
+ * background road
+ * Sign posts
+ * Options screen
+ * More pickups ?
+ * Game Over when run out of fuel
+ * Make the buggy bounce a bit - adjust buggyY up and down 1-2 pixels randomly.
+ * Over rev damage
+ * Gears / max revs & speed per gear
+ * Different vehicles ? Unlikely, but worth considering
+ * Fuel usage and distance a percentage of speed
+*/
+
+#include <arduboy.h>
+
+Arduboy ab;
+
+PROGMEM const unsigned char Buggy[][64] =
+{
+	{
+		0x00, 0x00, 0x00, 0x00, 0x80, 0xe0, 0x90, 0x88, 0xb4, 0xaa, 0xa5, 0xa5, 0xa5, 0xa5, 0xbd, 0x81,
+		0xff, 0x81, 0xbd, 0xa5, 0xa5, 0xa5, 0xaa, 0xb4, 0xa8, 0x90, 0x90, 0x90, 0x90, 0xa0, 0xc0, 0x80,
+		0x00, 0x00, 0x00, 0x00, 0x0f, 0x08, 0x04, 0x0a, 0x1e, 0x0a, 0x04, 0x08, 0x08, 0x08, 0x08, 0x08,
+		0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x04, 0x0a, 0x1e, 0x0a, 0x04, 0x0f,
+	},
+	{
+		0x00, 0x00, 0x00, 0x00, 0x80, 0xe0, 0x90, 0x88, 0xb4, 0xaa, 0xa5, 0xa5, 0xa5, 0xa5, 0xbd, 0x81,
+		0xff, 0x81, 0xbd, 0xa5, 0xa5, 0xa5, 0xaa, 0xb4, 0xa8, 0x90, 0x90, 0x90, 0x90, 0xa0, 0xc0, 0x80,
+		0x00, 0x00, 0x00, 0x00, 0x0f, 0x08, 0x04, 0x16, 0x0a, 0x16, 0x04, 0x08, 0x08, 0x08, 0x08, 0x08,
+		0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x04, 0x16, 0x0a, 0x16, 0x04, 0x0f,
+	}
+};
+
+PROGMEM const unsigned char fuelPkUp[] =
+{
+	0xff, 0x81, 0xfd, 0x95, 0x85, 0x85, 0x81, 0xff,
+};
+
+PROGMEM const unsigned char boostPkUp[] =
+{
+	0xff, 0x81, 0xfd, 0xd5, 0xd5, 0xed, 0x81, 0xff,
+};
+
+PROGMEM const unsigned char repairPkUp[] =
+{
+	0xff, 0x81, 0xfd, 0x95, 0xb5, 0xc9, 0x81, 0xff,
+};
+
+PROGMEM const unsigned char sign1[] =
+{
+	0x00, 0x00, 0x00, 0x7c, 0x82, 0x01, 0x7d, 0x01,
+	0x39, 0x45, 0x39, 0x82, 0x7c, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0xff,
+	0xff, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+PROGMEM const unsigned char sign2[] =
+{
+	0x00, 0x00, 0x00, 0x7c, 0xca, 0x65, 0x59, 0x01,
+	0x39, 0x45, 0x39, 0x82, 0x7c, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0xff,
+	0xff, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+PROGMEM const unsigned char sign3[] =
+{
+	0x00, 0x00, 0x00, 0x7c, 0xc6, 0x55, 0x2d, 0x01,
+	0x39, 0x45, 0x39, 0x82, 0x7c, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0xff,
+	0xff, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+PROGMEM const unsigned char sign4[] =
+{
+	0x00, 0x00, 0x00, 0x7c, 0xbe, 0x21, 0x79, 0x01,
+	0x39, 0x45, 0x39, 0x82, 0x7c, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0xff,
+	0xff, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+
+int AnimNum = 0;	//Animation frame number
+int buggyX = 0;		//Buggy X position
+int buggyY = 50;	//Buggy Y position
+int fuel = 1000;	//Fuel left
+int distance = 0;	//Distance travelled
+int rpm = 1000;		//Rev counter - too high = dead engine
+int speed = 0;		//Current speed of the vehicle
+int gear = 0;		//Current gear of the vehicle - limit to 4
+int health = 3;		//Start with a good engine. 0=dead
+bool turbo = false;	//Button A for turbo speed - race faster, burn fuel faster
+int boost = 2;		//Booster multiplier - get rid of?
+
+// the setup function runs once when you press reset or power the board
+void setup() {
+	ab.beginNoLogo(); //saves time when starting - uses less memory too. Change when ready for release.
+	ab.setFrameRate(15); //May need to increase depending on how things go in the end.
+}
+
+// the loop function runs over and over again until power down or reset
+void loop() {
+
+	if (!ab.nextFrame()) { // if not time for the next frame
+		return;
+	}
+	ab.clear();
+	
+
+	if (ab.pressed(A_BUTTON)) {
+		turbo = true;
+	}
+	else
+	{
+		turbo = false;
+	}
+
+	if (ab.pressed(RIGHT_BUTTON)){//skip turb option for the moment.
+		if (turbo) {
+			//do something if the turbo is on
+			// 3x fuel usage and 30% faster top speed 2x acceleration
+			if (ab.everyXFrames(1)) {
+				ab.setCursor(0, 20);
+				ab.print("Turbo");
+				ab.display();
+			}
+		}
+
+		if (ab.everyXFrames(3)) {
+			distance++; //increase distance
+			AnimNum++;	//increase animation number
+			if (AnimNum == 2) {
+				AnimNum = 0;
+			}
+		}
+		if (ab.everyXFrames(1)) {
+			fuel--;		//decrease fuel
+		}
+		buggyX++;
+		speed++;
+
+		if (buggyX > 20) buggyX = 20;
+		if (speed > 100) speed = 100;
+	}
+
+	if (ab.notPressed(RIGHT_BUTTON)) {
+		if (speed > 0) {
+			if (ab.everyXFrames(1)) {
+				buggyX--;
+				if (buggyX <= 0) buggyX = 0;
+				if (speed <= 0) speed = 0;
+			}
+			if (ab.everyXFrames(3)) {
+				distance++;
+				AnimNum++;
+				speed--;
+				fuel--;
+				if (AnimNum == 2) {
+					AnimNum = 0;
+				}
+			}
+
+		}
+	}
+
+	if (ab.pressed(UP_BUTTON)) {
+		gear++;
+		if (gear > 4){
+			gear = 4;
+		}
+	}
+
+	if (ab.pressed(DOWN_BUTTON)) {
+		gear--;
+		if (gear < 0) {
+			gear = 0;
+		}
+	}
+
+	ab.setCursor(0, 0);
+	char a[16];
+	sprintf(a,"Fuel:%u", fuel);
+	ab.print(a);
+	ab.setCursor(0, 10);
+	char b[16];
+	sprintf(b, "Spd:%u", speed);
+	ab.print(b);
+	ab.setCursor(60, 0);
+	char t[16];
+	sprintf(t, "Dist:%um", distance);
+	ab.print(t);
+	ab.setCursor(60, 10);
+	char g[16];
+	sprintf(g, "Gear:%u", gear);
+	ab.print(g);
+	ab.setCursor(60, 20);
+	char r[16];
+	sprintf(r, "RPM:%u", rpm);
+	ab.print(r);
+	ab.drawBitmap(buggyX, buggyY, Buggy[AnimNum], 32, 16, WHITE);
+	ab.display();
+	
+}
+
+void CheckSpeed() {	//Currently not used at all.
+	if (speed > 0) {
+		if (ab.everyXFrames(3)) {
+			distance++;
+			AnimNum++;
+			if (AnimNum == 2) {
+				AnimNum = 0;
+			}
+		}
+		if (ab.everyXFrames(5)) {
+			fuel--;
+		}
+	}
+}
+
+
+
+
